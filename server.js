@@ -11,10 +11,10 @@ app.use(express.json());
 
 // Set up PostgreSQL connection pool
 const pool = new Pool({
-  user: process.env.PG_USER,       // Database username
+  user: process.env.PG_USER || 'safaruz_user' ,      // Database username
   host: process.env.PG_HOST || 'localhost',  // Database host
   database: process.env.PG_DATABASE || 'safaruz', // Database name
-  password: process.env.PG_PASSWORD,   // Database password
+  password: process.env.PG_PASSWORD || '03082003E.S.',   // Database password
   port: process.env.PG_PORT || 5432,  // PostgreSQL default port
 });
 
@@ -49,7 +49,7 @@ app.get("/get-data", async (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
