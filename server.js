@@ -13,7 +13,7 @@ app.use(express.json());
 const pool = new Pool({
   user: process.env.PG_USER || 'safaruz_user' ,      // Database username
   host: process.env.PG_HOST || 'localhost',  // Database host
-  database: process.env.PG_DATABASE || 'safaruz', // Database name
+  database: process.env.PG_DATABASE || 'postgres', // Database name
   password: process.env.PG_PASSWORD || '03082003E.S.',   // Database password
   port: process.env.PG_PORT || 5432,  // PostgreSQL default port
 });
