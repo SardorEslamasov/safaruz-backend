@@ -6,7 +6,7 @@ require('dotenv').config();
 const pool = new Pool({
   user: 'safaruz_user',       // your PostgreSQL username
   host: 'localhost',          // database server
-  database: 'safaruz',        // the database you created
+  database: 'postgres',        // the database you created
   password: '03082003E.S.',   // the password you set for the user
   port: 5432,                 // PostgreSQL default port
 });
