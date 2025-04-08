@@ -4,6 +4,8 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { OpenAI } = require("openai");
+
 
 const app = express();
 app.use(cors());
@@ -35,6 +37,15 @@ if (!jwtSecret) {
   process.exit(1);
 }
 
+
+// Middleware
+app.use(cors());
+app.use(express.json()); // for parsing application/json
+
+// ✅ API Routes
+app.use("/api/auth", require("./src/routes/authRoutes"));
+
+
 // Default Route
 app.get("/", (req, res) => {
   res.send("SafarUz Backend is running...");
@@ -62,7 +73,7 @@ const authorizeRole = (role) => (req, res, next) => {
   next();
 };
 
-// ✅ User Signup Route
+//User Signup Route
 app.post('/signup', async (req, res) => {
   const { username, email, password, role } = req.body;
 
@@ -75,7 +86,7 @@ app.post('/signup', async (req, res) => {
       [username, email, hashedPassword, userRole]
     );
 
-    // Exclude password from response
+    //Exclude password from response
     const { password: _, ...userWithoutPassword } = result.rows[0];
 
     res.status(201).json({ message: 'User registered successfully', user: userWithoutPassword });
@@ -85,7 +96,7 @@ app.post('/signup', async (req, res) => {
   }
 });
 
-// ✅ User Login Route
+//User Login Route
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -113,16 +124,16 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// ✅ Admin-Only Route
+//Admin-Only Route
 app.get("/admin", authenticateToken, authorizeRole("admin"), (req, res) => {
   res.json({ message: "Welcome, Admin!" });
 });
 
-// ✅ Start Server
+//Start Server
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-// ✅ User Profile Route (Authenticated Users Only)
+//User Profile Route (Authenticated Users Only)
 app.get("/profile", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id; // Get user ID from token
@@ -143,7 +154,7 @@ app.get("/profile", authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ Update User Profile
+//Update User Profile
 app.patch('/profile', authenticateToken, async (req, res) => {
   const { username, email } = req.body;
   try {
@@ -154,7 +165,7 @@ app.patch('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ Change Password
+//Change Password
 app.patch('/profile/password', authenticateToken, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   try {
@@ -170,7 +181,7 @@ app.patch('/profile/password', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ Delete Account
+//Delete Account
 app.delete('/profile', authenticateToken, async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE id = $1', [req.user.id]);
@@ -180,12 +191,155 @@ app.delete('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ List All Users (Admin Only)
+//List All Users (Admin Only)
 app.get('/users', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const result = await pool.query('SELECT id, username, email, role FROM users');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching users' });
+  }
+});
+
+//Create a Tour (Admin only)
+app.post("/tours", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { name, description, price, location, available_spots } = req.body;
+  try {
+    const newTour = await pool.query(
+      "INSERT INTO tours (name, description, price, location, available_spots) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+      [name, description, price, location, available_spots]
+    );
+    res.status(201).json(newTour.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+//Book a Tour
+app.post("/bookings", authenticateToken, async (req, res) => {
+  const { tour_id } = req.body;
+  try {
+    const tour = await pool.query("SELECT * FROM tours WHERE id = $1", [tour_id]);
+    if (tour.rows.length === 0 || tour.rows[0].available_spots <= 0) {
+      return res.status(400).json({ error: "Tour not available" });
+    }
+
+    await pool.query("UPDATE tours SET available_spots = available_spots - 1 WHERE id = $1", [tour_id]);
+    const newBooking = await pool.query(
+      "INSERT INTO bookings (user_id, tour_id) VALUES ($1, $2) RETURNING *",
+      [req.user.id, tour_id]
+    );
+    res.status(201).json(newBooking.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+//Get all tours (with optional filters)
+app.get("/tours", async (req, res) => {
+  const { location, minPrice, maxPrice } = req.query;
+  let query = "SELECT * FROM tours WHERE 1=1";
+  const values = [];
+
+  if (location) {
+    values.push(location);
+    query += ` AND location = $${values.length}`;
+  }
+  if (minPrice) {
+    values.push(minPrice);
+    query += ` AND price >= $${values.length}`;
+  }
+  if (maxPrice) {
+    values.push(maxPrice);
+    query += ` AND price <= $${values.length}`;
+  }
+
+  try {
+    const result = await pool.query(query, values);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+app.get("/my-bookings", authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT b.id, t.name AS tour_name, t.location, t.price, b.created_at
+       FROM bookings b
+       JOIN tours t ON b.tour_id = t.id
+       WHERE b.user_id = $1`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch bookings" });
+  }
+});
+
+
+app.delete("/bookings/:id", authenticateToken, async (req, res) => {
+  const bookingId = req.params.id;
+  try {
+    const booking = await pool.query("SELECT * FROM bookings WHERE id = $1 AND user_id = $2", [bookingId, req.user.id]);
+    if (booking.rows.length === 0) return res.status(404).json({ error: "Booking not found" });
+
+    await pool.query("DELETE FROM bookings WHERE id = $1", [bookingId]);
+    await pool.query("UPDATE tours SET available_spots = available_spots + 1 WHERE id = $1", [booking.rows[0].tour_id]);
+
+    res.json({ message: "Booking cancelled successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to cancel booking" });
+  }
+});
+
+app.get("/admin/bookings", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT b.id, u.username, t.name AS tour_name, t.location, b.created_at
+      FROM bookings b
+      JOIN users u ON b.user_id = u.id
+      JOIN tours t ON b.tour_id = t.id
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch all bookings" });
+  }
+});
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+app.post("/ai-assistant", authenticateToken, async (req, res) => {
+  const { prompt } = req.body;
+
+  if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+
+  try {
+    const completion = await openai.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "You are a helpful travel assistant for tourists in Uzbekistan. Provide useful, friendly and localized answers.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      model: "gpt-3.5-turbo",
+      max_tokens: 200,
+    });
+
+    const aiResponse = completion.choices[0].message.content;
+    res.json({ response: aiResponse });
+  } catch (error) {
+    console.error("OpenAI Error:", error);
+    res.status(500).json({ error: "Failed to generate response" });
   }
 });
