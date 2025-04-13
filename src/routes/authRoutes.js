@@ -12,22 +12,26 @@ router.get("/test", (req, res) => {
 // Signup Route
 router.post('/signup', async (req, res) => {
     const { username, email, password, role } = req.body;
-
+  
     try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const userRole = role || 'user';  
-
-        const result = await pool.query(
-            'INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, $4) RETURNING *',
-            [username, email, hashedPassword, userRole]
-        );
-
-        res.status(201).json({ message: 'User registered successfully', user: result.rows[0] });
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const userRole = role || 'user';  
+  
+      const result = await pool.query(
+        'INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, $4) RETURNING *',
+        [username, email, hashedPassword, userRole]
+      );
+  
+      res.status(201).json({ message: 'User registered successfully', user: result.rows[0] });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Error registering user' });
+      if (err.code === '23505') {
+        // PostgreSQL duplicate key error
+        return res.status(400).json({ message: 'Email already in use' });
+      }
+      console.error(err);
+      res.status(500).json({ message: 'Error registering user' });
     }
-});
+  });
 
 // Login Route
 router.post('/login', async (req, res) => {

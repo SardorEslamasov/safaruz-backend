@@ -11,6 +11,26 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+// Serve static profile images
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// Multer setup for image uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadPath = path.join(__dirname, "uploads");
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath);
+    }
+    cb(null, uploadPath);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, `user-${req.user.id}${ext}`);
+  },
+});
+const upload = multer({ storage });
+
 // Database Connection
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -266,6 +286,84 @@ app.get("/tours", async (req, res) => {
   }
 });
 
+app.get("/hotels", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM hotels");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch hotels" });
+  }
+});
+
+// Restaurants
+app.get("/restaurants", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM restaurants");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch restaurants" });
+  }
+});
+
+// Recreational Places
+app.get("/recreations", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM recreational_places");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch recreational places" });
+  }
+});
+
+// Historical Places
+app.get("/historical-places", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM historical_places");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch historical places" });
+  }
+});
+
+// Transport Options
+app.get("/transport", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM transport_options");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch transport options" });
+  }
+});
+
+app.post("/hotel-bookings", authenticateToken, async (req, res) => {
+  const { hotel_id, check_in, check_out, guests } = req.body;
+  try {
+    const booking = await pool.query(
+      "INSERT INTO hotel_bookings (user_id, hotel_id, check_in, check_out, guests) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+      [req.user.id, hotel_id, check_in, check_out, guests || 1]
+    );
+    res.status(201).json({ message: "Hotel booked successfully", booking: booking.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to book hotel" });
+  }
+});
+
+app.get("/my-hotel-bookings", authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT hb.id, h.name AS hotel_name, hb.check_in, hb.check_out, hb.guests, hb.created_at
+       FROM hotel_bookings hb
+       JOIN hotels h ON hb.hotel_id = h.id
+       WHERE hb.user_id = $1`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch hotel bookings" });
+  }
+});
+
 
 app.get("/my-bookings", authenticateToken, async (req, res) => {
   try {
@@ -341,5 +439,305 @@ app.post("/ai-assistant", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("OpenAI Error:", error);
     res.status(500).json({ error: "Failed to generate response" });
+  }
+});
+
+
+// Reviews System
+app.post("/reviews", authenticateToken, async (req, res) => {
+  const { rating, comment, type, target_id } = req.body;
+
+  if (!rating || !type || !target_id) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const newReview = await pool.query(
+      "INSERT INTO reviews (user_id, rating, comment, type, target_id, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *",
+      [req.user.id, rating, comment, type, target_id]
+    );
+    res.status(201).json({ message: "Review submitted", review: newReview.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to submit review" });
+  }
+});
+
+app.get("/reviews", async (req, res) => {
+  const { type, id } = req.query;
+
+  if (!type || !id) {
+    return res.status(400).json({ error: "Missing type or id in query" });
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT r.id, r.rating, r.comment, r.created_at, u.username FROM reviews r JOIN users u ON r.user_id = u.id WHERE r.type = $1 AND r.target_id = $2",
+      [type, id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch reviews" });
+  }
+});
+
+app.post("/upload-profile", authenticateToken, upload.single("image"), async (req, res) => {
+  try {
+    const imageUrl = `/uploads/${req.file.filename}`;
+    await pool.query("UPDATE users SET profile_image = $1 WHERE id = $2", [imageUrl, req.user.id]);
+    res.json({ message: "Profile image uploaded successfully", imageUrl });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to upload profile image" });
+  }
+});
+
+// Create a new hotel
+app.post("/hotels", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { name, city, description, rating, address, contact_info, price_range, image_url } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO hotels (name, city, description, rating, address, contact_info, price_range, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+      [name, city, description, rating, address, contact_info, price_range, image_url]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create hotel" });
+  }
+});
+
+// Update a hotel
+app.put("/hotels/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { id } = req.params;
+  const { name, city, description, rating, address, contact_info, price_range, image_url } = req.body;
+  try {
+    await pool.query(
+      "UPDATE hotels SET name = $1, city = $2, description = $3, rating = $4, address = $5, contact_info = $6, price_range = $7, image_url = $8 WHERE id = $9",
+      [name, city, description, rating, address, contact_info, price_range, image_url, id]
+    );
+    res.json({ message: "Hotel updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update hotel" });
+  }
+});
+
+// Delete a hotel
+app.delete("/hotels/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  try {
+    await pool.query("DELETE FROM hotels WHERE id = $1", [req.params.id]);
+    res.json({ message: "Hotel deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete hotel" });
+  }
+});
+
+
+// Create a restaurant
+app.post("/restaurants", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { name, city, description, rating, address, contact_info, price_range, image_url } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO restaurants (name, city, description, rating, address, contact_info, price_range, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+      [name, city, description, rating, address, contact_info, price_range, image_url]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create restaurant" });
+  }
+});
+
+// Update a restaurant
+app.put("/restaurants/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { id } = req.params;
+  const { name, city, description, rating, address, contact_info, price_range, image_url } = req.body;
+  try {
+    await pool.query(
+      "UPDATE restaurants SET name = $1, city = $2, description = $3, rating = $4, address = $5, contact_info = $6, price_range = $7, image_url = $8 WHERE id = $9",
+      [name, city, description, rating, address, contact_info, price_range, image_url, id]
+    );
+    res.json({ message: "Restaurant updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update restaurant" });
+  }
+});
+
+// Delete a restaurant
+app.delete("/restaurants/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  try {
+    await pool.query("DELETE FROM restaurants WHERE id = $1", [req.params.id]);
+    res.json({ message: "Restaurant deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete restaurant" });
+  }
+});
+
+
+app.post("/historical-places", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { name, city, description, image_url } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO historical_places (name, city, description, image_url) VALUES ($1, $2, $3, $4) RETURNING *",
+      [name, city, description, image_url]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create historical place" });
+  }
+});
+
+app.put("/historical-places/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { id } = req.params;
+  const { name, city, description, image_url } = req.body;
+  try {
+    await pool.query(
+      "UPDATE historical_places SET name = $1, city = $2, description = $3, image_url = $4 WHERE id = $5",
+      [name, city, description, image_url, id]
+    );
+    res.json({ message: "Historical place updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update historical place" });
+  }
+});
+
+app.delete("/historical-places/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  try {
+    await pool.query("DELETE FROM historical_places WHERE id = $1", [req.params.id]);
+    res.json({ message: "Historical place deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete historical place" });
+  }
+});
+
+app.post("/recreations", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { name, city, description, image_url } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO recreational_places (name, city, description, image_url) VALUES ($1, $2, $3, $4) RETURNING *",
+      [name, city, description, image_url]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create recreational place" });
+  }
+});
+
+app.put("/recreations/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { id } = req.params;
+  const { name, city, description, image_url } = req.body;
+  try {
+    await pool.query(
+      "UPDATE recreational_places SET name = $1, city = $2, description = $3, image_url = $4 WHERE id = $5",
+      [name, city, description, image_url, id]
+    );
+    res.json({ message: "Recreational place updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update recreational place" });
+  }
+});
+
+app.delete("/recreations/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  try {
+    await pool.query("DELETE FROM recreational_places WHERE id = $1", [req.params.id]);
+    res.json({ message: "Recreational place deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete recreational place" });
+  }
+});
+
+
+app.post("/transport", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { type, city, description, provider, contact_info, price_estimate } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO transport_options (type, city, description, provider, contact_info, price_estimate) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+      [type, city, description, provider, contact_info, price_estimate]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create transport option" });
+  }
+});
+
+app.put("/transport/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { id } = req.params;
+  const { type, city, description, provider, contact_info, price_estimate } = req.body;
+  try {
+    await pool.query(
+      "UPDATE transport_options SET type = $1, city = $2, description = $3, provider = $4, contact_info = $5, price_estimate = $6 WHERE id = $7",
+      [type, city, description, provider, contact_info, price_estimate, id]
+    );
+    res.json({ message: "Transport option updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update transport option" });
+  }
+});
+
+app.delete("/transport/:id", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  try {
+    await pool.query("DELETE FROM transport_options WHERE id = $1", [req.params.id]);
+    res.json({ message: "Transport option deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete transport option" });
+  }
+});
+
+app.post("/suggest-tours", authenticateToken, async (req, res) => {
+  const { city, maxBudget, interests } = req.body;
+
+  let query = "SELECT * FROM tours WHERE 1=1";
+  const values = [];
+
+  if (city) {
+    values.push(city);
+    query += ` AND location ILIKE $${values.length}`;
+  }
+
+  if (maxBudget) {
+    values.push(maxBudget);
+    query += ` AND price <= $${values.length}`;
+  }
+
+  try {
+    const allTours = await pool.query(query, values);
+    let suggestedTours = allTours.rows;
+
+    // Optional: filter by keyword if interests are passed
+    if (interests && interests.length > 0) {
+      suggestedTours = suggestedTours.filter((tour) =>
+        interests.some((keyword) =>
+          tour.description.toLowerCase().includes(keyword.toLowerCase())
+        )
+      );
+    }
+
+    res.json({ suggestedTours });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch suggested tours" });
+  }
+});
+
+// Get all cities
+app.get("/cities", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM cities");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch cities" });
+  }
+});
+
+// Admin: Add new city
+app.post("/cities", authenticateToken, authorizeRole("admin"), async (req, res) => {
+  const { name, description, image_url } = req.body;
+  try {
+    const result = await pool.query(
+      "INSERT INTO cities (name, description, image_url) VALUES ($1, $2, $3) RETURNING *",
+      [name, description, image_url]
+    );
+    res.status(201).json({ message: "City added", city: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to add city" });
   }
 });
