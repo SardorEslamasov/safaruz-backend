@@ -5,6 +5,10 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { OpenAI } = require("openai");
+const path = require("path");
+const multer = require("multer");
+
+
 
 
 const app = express();
@@ -59,11 +63,16 @@ if (!jwtSecret) {
 
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: "http://localhost:3000"
+}));
 app.use(express.json()); // for parsing application/json
 
 // ✅ API Routes
 app.use("/api/auth", require("./src/routes/authRoutes"));
+const userRoutes = require("./src/routes/userRoutes");
+app.use("/api/users", userRoutes);
+
 
 
 // Default Route
@@ -739,5 +748,65 @@ app.post("/cities", authenticateToken, authorizeRole("admin"), async (req, res) 
     res.status(201).json({ message: "City added", city: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: "Failed to add city" });
+  }
+});
+
+// Get historical places by city
+app.get("/cities/:cityName/historical-places", async (req, res) => {
+  const city = req.params.cityName;
+  try {
+    const result = await pool.query(
+      "SELECT * FROM historical_places WHERE LOWER(city) = LOWER($1)",
+      [city]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch historical places" });
+  }
+});
+
+// Get recreational places by city
+app.get("/cities/:cityName/recreations", async (req, res) => {
+  const city = req.params.cityName;
+  try {
+    const result = await pool.query(
+      "SELECT * FROM recreational_places WHERE LOWER(city) = LOWER($1)",
+      [city]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch recreational places" });
+  }
+});
+
+// Get hotels by city
+app.get("/cities/:cityName/hotels", async (req, res) => {
+  const city = req.params.cityName;
+  try {
+    const result = await pool.query(
+      "SELECT * FROM hotels WHERE LOWER(city) = LOWER($1)",
+      [city]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch hotels" });
+  }
+});
+
+// Get restaurants by city
+app.get("/cities/:cityName/restaurants", async (req, res) => {
+  const city = req.params.cityName;
+  try {
+    const result = await pool.query(
+      "SELECT * FROM restaurants WHERE LOWER(city) = LOWER($1)",
+      [city]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch restaurants" });
   }
 });

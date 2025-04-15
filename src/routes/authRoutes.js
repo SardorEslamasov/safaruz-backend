@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../config/db'); // PostgreSQL connection
 const jwt = require('jsonwebtoken');
+const authenticateToken = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -10,16 +11,15 @@ router.get("/test", (req, res) => {
   });
   
 // Signup Route
-router.post('/signup', async (req, res) => {
-    const { username, email, password, role } = req.body;
+router.post('/register', async (req, res) => {
+    const { name, email, password} = req.body;
   
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
-      const userRole = role || 'user';  
   
       const result = await pool.query(
-        'INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, $4) RETURNING *',
-        [username, email, hashedPassword, userRole]
+        'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING *',
+        [name, email, hashedPassword]
       );
   
       res.status(201).json({ message: 'User registered successfully', user: result.rows[0] });
@@ -63,6 +63,29 @@ router.post('/login', async (req, res) => {
         console.error(err);
         res.status(500).json({ message: 'Error logging in' });
     }
+});
+
+router.get("/profile", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId; // assuming you store userId in token
+
+    const result = await pool.query(
+      "SELECT name, email FROM users WHERE id = $1",
+      [userId]
+    );
+
+    const user = result.rows[0];
+
+    res.json({
+      name: user.name,
+      email: user.email,
+      bookedTours: [], // optional: pull real data if you have it
+      bookedHotels: [],
+    });
+  } catch (err) {
+    console.error("Profile error:", err.message);
+    res.status(500).json({ message: "Error loading profile" });
+  }
 });
 
 module.exports = router;
