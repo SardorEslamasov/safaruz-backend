@@ -810,3 +810,45 @@ app.get("/cities/:cityName/restaurants", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch restaurants" });
   }
 });
+
+app.get("/hotels", async (req, res) => {
+  const { minPrice, maxPrice } = req.query;
+  let query = "SELECT * FROM hotels WHERE 1=1";
+  let params = [];
+
+  if (minPrice) {
+    query += " AND price_per_night >= $1";
+    params.push(minPrice);
+  }
+
+  if (maxPrice) {
+    query += params.length ? " AND price_per_night <= $" + (params.length + 1) : " AND price_per_night <= $1";
+    params.push(maxPrice);
+  }
+
+  const { rows } = await pool.query(query, params);
+  res.json(rows);
+});
+
+app.get("/restaurants", async (req, res) => {
+  try {
+    const { minPrice, maxPrice } = req.query;
+    let query = "SELECT * FROM restaurants WHERE 1=1";
+    const params = [];
+
+    if (minPrice) {
+      query += " AND price >= $1";
+      params.push(minPrice);
+    }
+    if (maxPrice) {
+      query += params.length === 0 ? " AND price <= $1" : " AND price <= $" + (params.length + 1);
+      params.push(maxPrice);
+    }
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error fetching restaurants:", error);
+    res.status(500).json({ error: "Failed to fetch restaurants" });
+  }
+});
