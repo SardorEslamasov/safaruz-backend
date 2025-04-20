@@ -832,17 +832,23 @@ app.get("/hotels", async (req, res) => {
 
 app.get("/restaurants", async (req, res) => {
   try {
-    const { minPrice, maxPrice } = req.query;
+    const { location, rating, type } = req.query;
     let query = "SELECT * FROM restaurants WHERE 1=1";
     const params = [];
 
-    if (minPrice) {
-      query += " AND price >= $1";
-      params.push(minPrice);
+    if (location) {
+      params.push(location);
+      query += ` AND location = $${params.length}`;
     }
-    if (maxPrice) {
-      query += params.length === 0 ? " AND price <= $1" : " AND price <= $" + (params.length + 1);
-      params.push(maxPrice);
+
+    if (rating) {
+      params.push(Number(rating));
+      query += ` AND rating >= $${params.length}`;
+    }
+
+    if (type) {
+      params.push(type);
+      query += ` AND type = $${params.length}`;
     }
 
     const result = await pool.query(query, params);
@@ -852,3 +858,4 @@ app.get("/restaurants", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch restaurants" });
   }
 });
+
